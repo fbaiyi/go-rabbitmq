@@ -3,7 +3,7 @@ rabbitmq的消费者和生产者
 
 # 在项目中安装使用
 ```shell
-go get -u github.com/MQEnergy/go-rabbitmq
+go get -u github.com/fbaiyi/go-rabbitmq
 ```
 
 # 测试
