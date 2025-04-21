@@ -2,7 +2,7 @@ package main
 
 import (
 	"fmt"
-	gorabbitmq "github.com/MQEnergy/go-rabbitmq"
+	gorabbitmq "github.com/fbaiyi/go-rabbitmq"
 	"time"
 )
 
