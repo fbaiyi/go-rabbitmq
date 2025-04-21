@@ -59,7 +59,7 @@ var (
 )
 
 // New 创建一个新的消费者状态实例，并自动尝试连接到服务器
-func New(config *Config, queueName, exchange, routeKey string, exchangeType, prefetchCount int, durable bool) (*RabbitMQ, error) {
+func New(config *Config, queueName, exchange, routeKey string, exchangeType, prefetchCount int, durable bool, boolChan chan bool) (*RabbitMQ, error) {
 	// amqp 出现url.Parse导致的错误 是因为特殊字符需要进行urlencode编码
 	password := url.QueryEscape(config.Password)
 	// amqp://账号:密码@rabbitmq服务器地址:端口号/vhost
@@ -97,17 +97,18 @@ func New(config *Config, queueName, exchange, routeKey string, exchangeType, pre
 	if err := rabbitmq.init(rabbitmq.conn); err != nil {
 		return nil, err
 	}
-	go rabbitmq.handleReconnect(rabbitmq.Addr)
+	go rabbitmq.handleReconnect(rabbitmq.Addr, boolChan)
 	return rabbitmq, nil
 }
 
 // handleReconnect 将在notifyConnClose上等待连接错误，然后不断尝试重新连接。
-func (m *RabbitMQ) handleReconnect(addr string) {
+func (m *RabbitMQ) handleReconnect(addr string, boolChan chan bool) {
 	for {
 		m.isReady = false
 		// 企图连接
 		conn, err := m.connect(addr)
 		if err != nil {
+			fmt.Printf("Consumer failed: %s\n", err)
 			//	连接失败 尝试重连
 			select {
 			case <-m.Done:
@@ -116,7 +117,7 @@ func (m *RabbitMQ) handleReconnect(addr string) {
 			}
 			continue
 		}
-		if done := m.handleReInit(conn); done {
+		if done := m.handleReInit(conn, boolChan); done {
 			break
 		}
 	}
@@ -134,7 +135,7 @@ func (m *RabbitMQ) connect(addr string) (*amqp.Connection, error) {
 }
 
 // handleReInit 等待一个通道错误，然后不断尝试重新初始化两个通道
-func (m *RabbitMQ) handleReInit(conn *amqp.Connection) bool {
+func (m *RabbitMQ) handleReInit(conn *amqp.Connection, boolChan chan bool) bool {
 	for {
 		m.isReady = false
 		if err := m.init(conn); err != nil {
@@ -146,6 +147,7 @@ func (m *RabbitMQ) handleReInit(conn *amqp.Connection) bool {
 			}
 			continue
 		}
+		boolChan <- true
 		select {
 		case <-m.Done:
 			return true
