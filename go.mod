@@ -1,4 +1,4 @@
-module github.com/fbaiyi/go-rabbitmq/v2
+module github.com/fbaiyi/go-rabbitmq
 
 go 1.20
 
