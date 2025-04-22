@@ -21,6 +21,7 @@ type (
 		Addr            string // 连接地址
 		Type            string // 交换机连接方式 direct topic fanout headers 可为空
 		Done            chan bool
+		ConnSuccess     chan bool // 链接成功信息
 		isReady         bool
 		PrefetchCount   int  // 消费者消费数据限流数
 		Durable         bool // 是否queue队列持久化
@@ -59,7 +60,7 @@ var (
 )
 
 // New 创建一个新的消费者状态实例，并自动尝试连接到服务器
-func New(config *Config, queueName, exchange, routeKey string, exchangeType, prefetchCount int, durable bool, boolChan chan bool) (*RabbitMQ, error) {
+func New(config *Config, queueName, exchange, routeKey string, exchangeType, prefetchCount int, durable bool) (*RabbitMQ, error) {
 	// amqp 出现url.Parse导致的错误 是因为特殊字符需要进行urlencode编码
 	password := url.QueryEscape(config.Password)
 	// amqp://账号:密码@rabbitmq服务器地址:端口号/vhost
@@ -87,6 +88,7 @@ func New(config *Config, queueName, exchange, routeKey string, exchangeType, pre
 		RouteKey:      routeKey,
 		Addr:          addr,
 		Done:          make(chan bool),
+		ConnSuccess:   make(chan bool),
 		PrefetchCount: prefetchCount,
 		Durable:       durable,
 	}
@@ -97,12 +99,12 @@ func New(config *Config, queueName, exchange, routeKey string, exchangeType, pre
 	if err := rabbitmq.init(rabbitmq.conn); err != nil {
 		return nil, err
 	}
-	go rabbitmq.handleReconnect(rabbitmq.Addr, boolChan)
+	go rabbitmq.handleReconnect(rabbitmq.Addr)
 	return rabbitmq, nil
 }
 
 // handleReconnect 将在notifyConnClose上等待连接错误，然后不断尝试重新连接。
-func (m *RabbitMQ) handleReconnect(addr string, boolChan chan bool) {
+func (m *RabbitMQ) handleReconnect(addr string) {
 	for {
 		m.isReady = false
 		// 企图连接
@@ -117,7 +119,7 @@ func (m *RabbitMQ) handleReconnect(addr string, boolChan chan bool) {
 			}
 			continue
 		}
-		if done := m.handleReInit(conn, boolChan); done {
+		if done := m.handleReInit(conn); done {
 			break
 		}
 	}
@@ -135,7 +137,7 @@ func (m *RabbitMQ) connect(addr string) (*amqp.Connection, error) {
 }
 
 // handleReInit 等待一个通道错误，然后不断尝试重新初始化两个通道
-func (m *RabbitMQ) handleReInit(conn *amqp.Connection, boolChan chan bool) bool {
+func (m *RabbitMQ) handleReInit(conn *amqp.Connection) bool {
 	for {
 		m.isReady = false
 		if err := m.init(conn); err != nil {
@@ -147,7 +149,7 @@ func (m *RabbitMQ) handleReInit(conn *amqp.Connection, boolChan chan bool) bool 
 			}
 			continue
 		}
-		boolChan <- true
+		m.ConnSuccess <- true
 		select {
 		case <-m.Done:
 			return true
