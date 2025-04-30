@@ -99,26 +99,28 @@ func New(config *Config, queueName, exchange, routeKey string, exchangeType, pre
 	if err := rabbitmq.init(rabbitmq.conn); err != nil {
 		return nil, err
 	}
-	go rabbitmq.handleReconnect(rabbitmq.Addr)
+	go rabbitmq.handleReconnect(rabbitmq.conn, rabbitmq.Addr)
 	return rabbitmq, nil
 }
 
 // handleReconnect 将在notifyConnClose上等待连接错误，然后不断尝试重新连接。
-func (m *RabbitMQ) handleReconnect(addr string) {
+func (m *RabbitMQ) handleReconnect(conn *amqp.Connection, addr string) {
 	for {
-		m.isReady = false
 		// 企图连接
-		conn, err := m.connect(addr)
-		if err != nil {
-			fmt.Printf("Consumer failed: %s\n", err)
-			//	连接失败 尝试重连
-			select {
-			case <-m.Done:
-				return
-			case <-time.After(reconnectDelay):
+		if !m.isReady {
+			conn, err = m.connect(addr)
+			if err != nil {
+				fmt.Printf("Consumer failed: %s\n", err)
+				//	连接失败 尝试重连
+				select {
+				case <-m.Done:
+					return
+				case <-time.After(reconnectDelay):
+				}
+				continue
 			}
-			continue
 		}
+
 		if done := m.handleReInit(conn); done {
 			break
 		}
@@ -139,15 +141,16 @@ func (m *RabbitMQ) connect(addr string) (*amqp.Connection, error) {
 // handleReInit 等待一个通道错误，然后不断尝试重新初始化两个通道
 func (m *RabbitMQ) handleReInit(conn *amqp.Connection) bool {
 	for {
-		m.isReady = false
-		if err := m.init(conn); err != nil {
-			// 初始化channel失败 重试
-			select {
-			case <-m.Done:
-				return true
-			case <-time.After(reInitDelay):
+		if !m.isReady {
+			if err := m.init(conn); err != nil {
+				// 初始化channel失败 重试
+				select {
+				case <-m.Done:
+					return true
+				case <-time.After(reInitDelay):
+				}
+				continue
 			}
-			continue
 		}
 		m.ConnSuccess <- true
 		select {
@@ -155,8 +158,10 @@ func (m *RabbitMQ) handleReInit(conn *amqp.Connection) bool {
 			return true
 		case <-m.notifyConnClose:
 			// 连接关闭 重新连接
+			m.isReady = false
 			return false
 		case <-m.notifyChanClose:
+			m.isReady = false
 			//	channel关闭重新init
 		}
 	}
