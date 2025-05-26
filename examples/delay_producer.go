@@ -16,7 +16,7 @@ func main() {
 	}
 	// 注意 队列是否持久化.false:队列在内存中,服务器挂掉后,队列就没了;true:服务器重启后,队列将会重新生成.注意:只是队列持久化,不代表队列中的消息持久化!!!!
 	// 已存在的队列 查看 Features参数是否为持久化（D），不存在的队列按需设置是否持久化
-	mq, err := gorabbitmq.New(config, "order_message", "order", "order_message", 0, 1, true, false)
+	mq, err := gorabbitmq.New(config, "delay_message", "delay", "delay_message", 0, 1, true, true)
 	// 需要等待一秒钟
 	if err != nil {
 		panic(err)
@@ -24,7 +24,7 @@ func main() {
 	defer mq.Close()
 	data := []byte("{\"hello\":\"world " + time.Now().Format("2006-01-02 15:04:05") + "\"}")
 	if <-mq.ConnSuccess {
-		if err = mq.Push(data, 0); err != nil {
+		if err = mq.Push(data, 5); err != nil {
 			panic(err)
 		}
 	}

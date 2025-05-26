@@ -17,7 +17,7 @@ func main() {
 	}
 	// 注意 队列是否持久化.false:队列在内存中,服务器挂掉后,队列就没了;true:服务器重启后,队列将会重新生成.注意:只是队列持久化,不代表队列中的消息持久化!!!!
 	// 已存在的队列 查看 Features参数是否为持久化（D），不存在的队列按需设置是否持久化
-	mq, err := gorabbitmq.New(config, "order_message", "order", "order_message", 0, 1, true, false)
+	mq, err := gorabbitmq.New(config, "delay_message", "delay", "delay_message", 0, 1, true, true)
 	if err != nil {
 		panic("err" + err.Error())
 	}
@@ -26,7 +26,7 @@ func main() {
 		select {
 		case <-mq.ConnSuccess:
 			go func() {
-				err = amqphandler(mq, 3)
+				err = amqpDelayHandler(mq, 3)
 				if err != nil {
 					panic(err)
 				}
@@ -36,7 +36,7 @@ func main() {
 }
 
 // amqphandler 消息队列处理
-func amqphandler(mq *gorabbitmq.RabbitMQ, consumerNum int) error {
+func amqpDelayHandler(mq *gorabbitmq.RabbitMQ, consumerNum int) error {
 	var wg sync.WaitGroup
 	cherrors := make(chan error)
 	wg.Add(consumerNum)

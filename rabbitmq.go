@@ -20,6 +20,7 @@ type (
 		RouteKey        string // 路由键 可为空
 		Addr            string // 连接地址
 		Type            string // 交换机连接方式 direct topic fanout headers 可为空
+		IsDelay         bool   // 是否是延时队列
 		Done            chan bool
 		ConnSuccess     chan bool // 链接成功信息
 		isReady         bool
@@ -59,8 +60,19 @@ var (
 	err              error
 )
 
-// New 创建一个新的消费者状态实例，并自动尝试连接到服务器
-func New(config *Config, queueName, exchange, routeKey string, exchangeType, prefetchCount int, durable bool) (*RabbitMQ, error) {
+// New
+// @Description: 创建一个新的消费者状态实例，并自动尝试连接到服务器
+// @param config
+// @param queueName
+// @param exchange
+// @param routeKey
+// @param exchangeType 交换机连接方式
+// @param prefetchCount 消费者消费数据限流数
+// @param durable 是否queue队列持久化
+// @param isDelay 是否是延时队列 ture 是
+// @return *RabbitMQ
+// @return error
+func New(config *Config, queueName, exchange, routeKey string, exchangeType, prefetchCount int, durable, isDelay bool) (*RabbitMQ, error) {
 	// amqp 出现url.Parse导致的错误 是因为特殊字符需要进行urlencode编码
 	password := url.QueryEscape(config.Password)
 	// amqp://账号:密码@rabbitmq服务器地址:端口号/vhost
@@ -85,6 +97,7 @@ func New(config *Config, queueName, exchange, routeKey string, exchangeType, pre
 		QueueName:     queueName,
 		Exchange:      exchange,
 		Type:          _type,
+		IsDelay:       isDelay,
 		RouteKey:      routeKey,
 		Addr:          addr,
 		Done:          make(chan bool),
@@ -194,10 +207,18 @@ func (m *RabbitMQ) init(conn *amqp.Connection) error {
 	}
 
 	if m.Exchange != "" {
+		exchangeType := m.Type
+		var args amqp.Table
+		if m.IsDelay {
+			exchangeType = "x-delayed-message"
+			args = amqp.Table{
+				"x-delayed-type": m.Type,
+			}
+		}
 		// 如果没有exchange就创建
 		if err := ch.ExchangeDeclare(
 			m.Exchange,
-			m.Type,
+			exchangeType,
 			// 是否持久化
 			true,
 			// 是否为自动删除
@@ -207,7 +228,7 @@ func (m *RabbitMQ) init(conn *amqp.Connection) error {
 			// 是否阻塞
 			false,
 			// 额外属性
-			nil); err != nil {
+			args); err != nil {
 			return err
 		}
 		// 绑定Queue
@@ -237,15 +258,17 @@ func (m *RabbitMQ) changeChannel(ch *amqp.Channel) {
 }
 
 // Push 将数据推送到队列中，并等待确认。
-// 如果在resendTimeout时间内没有收到确认信息，
-// 它不断地重新发送消息，直到收到一个确认。
-// 直到服务器发送确认信息。错误是只在推送操作本身失败时返回，参见UnsafePush。
-func (m *RabbitMQ) Push(data []byte) error {
+// @Description: 如果在resendTimeout时间内没有收到确认信息，它不断地重新发送消息，直到收到一个确认。直到服务器发送确认信息。错误是只在推送操作本身失败时返回，参见UnsafePush。
+// @receiver m
+// @param data
+// @param delayTime 延时时间 秒
+// @return error
+func (m *RabbitMQ) Push(data []byte, delayTime int) error {
 	if m.isReady == false {
 		return errFailedToPush
 	}
 	for {
-		if err := m.UnsafePush(data); err != nil {
+		if err := m.UnsafePush(data, delayTime); err != nil {
 			// 推送失败 重试
 			select {
 			case <-m.Done:
@@ -268,9 +291,18 @@ func (m *RabbitMQ) Push(data []byte) error {
 
 // UnsafePush 将push到队列而不检查确认。如果连接失败，则返回错误。
 // 没有提供服务器是否会接收消息。
-func (m *RabbitMQ) UnsafePush(data []byte) error {
+func (m *RabbitMQ) UnsafePush(data []byte, delayTime int) error {
 	if m.isReady == false {
 		return errNotConnected
+	}
+	pushData := amqp.Publishing{
+		ContentType: "text/plain",
+		Body:        data,
+	}
+	if m.IsDelay {
+		pushData.Headers = map[string]interface{}{
+			"x-delay": delayTime * 1000, //消息交换机过期时间 毫秒
+		}
 	}
 	return m.channel.Publish(
 		m.Exchange,
@@ -279,10 +311,7 @@ func (m *RabbitMQ) UnsafePush(data []byte) error {
 		false,
 		// 如果为true, 当exchange发送消息到队列后发现队列上没有绑定消费者，则会把消息发还给发送者
 		false,
-		amqp.Publishing{
-			ContentType: "text/plain",
-			Body:        data,
-		})
+		pushData)
 }
 
 // Consume 将不断地将队列项放到通道上。
