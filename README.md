@@ -3,7 +3,7 @@ rabbitmq的消费者和生产者
 
 # 在项目中安装使用
 ```shell
-go get -u github.com/fbaiyi/go-rabbitmq
+go get -u github.com/fbaiyi/go-rabbitmq/v2
 ```
 
 # 测试
@@ -17,10 +17,12 @@ go mod tidy
 消费者
 ```shell
 go run examples/consumer.go
+go run examples/delay_consumer.go
 ```
 生产者
 ```shell
 go run examples/producer.go
+go run examples/delay_producer.go
 ```
 查看效果
 
